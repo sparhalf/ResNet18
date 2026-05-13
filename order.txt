@@ -1,0 +1,1 @@
+cd /data/home/dyq/programme_2 && mkdir -p artifacts/60epoch && CUDA_VISIBLE_DEVICES=4 nohup python main.py train --config configs/default.yaml > artifacts/60epoch/train.log 2>&1 &

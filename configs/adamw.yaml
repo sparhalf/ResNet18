@@ -1,0 +1,148 @@
+# =============================================================================
+# STL-10 默认配置（baseline）
+# 加载方式：先读本文件，再与用户指定的 YAML 深度合并（后者覆盖同名键）。
+# 路径均相对「项目根目录」（main.py 所在目录）。
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# [1] 数据与输出路径
+# -----------------------------------------------------------------------------
+paths:
+  # STL-10 根目录，其下需有 train/、test/ 子目录（每类一个文件夹）
+  data_root: STL10
+  # 训练日志、权重、划分缓存、测评图等输出目录（可改为 artifacts/exp_xxx 做对比实验）
+  artifacts_dir: artifacts/adamw
+
+# -----------------------------------------------------------------------------
+# [2] 可复现与划分
+# -----------------------------------------------------------------------------
+repro:
+  # 随机种子：影响划分、shuffle、Dropout 等（完全可复现需配合确定性算子，见 train.set_seed）
+  seed: 42
+  # 从 train 中划给验证集的比例（分层抽样，每类按比例划分）
+  val_ratio: 0.10
+  # 是否缓存划分索引到 artifacts/.../splits/（同 val_ratio+seed 则复用，避免每次训练划分变动）
+  split_cache: true
+
+# -----------------------------------------------------------------------------
+# [3] DataLoader 与数据增强
+# -----------------------------------------------------------------------------
+data:
+  batch_size: 32
+  # DataLoader 预取子进程数；0 表示主进程加载（调试用）
+  num_workers: 4
+  # 输入空间尺寸（与 STL-10 原始 96 一致；若改大需同步改 RandomCrop.size）
+  image_size: 96
+  # CUDA 时建议 true，可加速 host→device 拷贝（无 GPU 时无影响）
+  pin_memory: true
+
+  # 训练阶段是否启用「augmentation_train」中的随机增强（false 时与验证集类似：仅 ToTensor + 归一化，便于对比实验）
+  augmentation_enabled: true
+
+  # 训练集增强：列表顺序即 Compose 顺序。type 可选项见 src/data/transforms.py 的 _build_one：
+  #   RandomHorizontalFlip, RandomVerticalFlip, RandomCrop, RandomResizedCrop,
+  #   ColorJitter, RandomRotation, GaussianBlur
+  # 注意：main.py 中训练 transform 使用 ensure_min_train_aug=true，
+  # 若列表中缺少 RandomHorizontalFlip 或 RandomCrop，会自动补默认项（不覆盖你已写的同名 type）。
+  augmentation_train:
+    - type: RandomHorizontalFlip
+      p: 0.5
+    - type: RandomCrop
+      size: [96, 96]
+      padding: 8
+
+  # 验证集 / 测试集变换：通常留空 []，仅 ToTensor + ImageNet 归一化（不做随机增强，指标才稳定）
+  augmentation_val_test: []
+
+# -----------------------------------------------------------------------------
+# [4] 模型（手写 ResNet-18 风格）
+# -----------------------------------------------------------------------------
+model:
+  # 当前仅支持 resnet18_manual（四阶段 BasicBlock）
+  arch: resnet18_manual
+  # 首层卷积通道数，后续 stage 通道按 1x、2x、4x、8x 递增
+  base_channels: 64
+  # 每个 stage 的残差块个数，长度须为 4，例如 [2,2,2,2] ≈ ResNet-18
+  layers: [2, 2, 2, 2]
+  # 激活：relu | gelu | silu / swish | tanh | sigmoid
+  activation: relu
+  use_bn: true
+  # 全连接层前的 Dropout；0 表示关闭
+  dropout: 0.1
+  # 全局池化后再接 Linear：avg = AdaptiveAvgPool2d(1) | max = AdaptiveMaxPool2d(1)
+  head_pooling: avg
+  # 是否在首段卷积 stem 之后接 MaxPool（与标准 ResNet 相同：kernel=3, stride=2, padding=1）。
+  # 96×96 输入下会较早缩小特征图，默认 false；大分辨率或对齐论文结构时可设 true。
+  stem_maxpool: false
+  num_classes: 10
+
+# -----------------------------------------------------------------------------
+# [5] 训练轮数与正则
+# -----------------------------------------------------------------------------
+train:
+  epochs: 50
+  # 标签平滑（CrossEntropyLoss）；0 关闭，常用 0.05～0.1 缓解过拟合
+  label_smoothing: 0.0
+  # 梯度全局范数裁剪；0 或省略表示不裁剪，>0 如 1.0 用于抑制梯度爆炸
+  grad_clip_norm: 0.0
+
+# -----------------------------------------------------------------------------
+# [6] 优化器
+# -----------------------------------------------------------------------------
+optimizer:
+  # 可选项：sgd | adam | adamw（小写）
+  name: adamw
+  lr: 0.01
+  # 仅 SGD 使用：动量系数
+  momentum: 0.9
+  weight_decay: 1.0e-4
+  # 仅 SGD：是否 Nesterov 动量（Adam/AdamW 忽略此项）
+  nesterov: true
+
+# -----------------------------------------------------------------------------
+# [7] 学习率调度
+# -----------------------------------------------------------------------------
+scheduler:
+  # 可选项：cosine | step | multistep | none / null（关闭调度器）
+  name: cosine
+  # 仅 cosine：余弦半周期长度（epoch 数）。null 表示使用 train.epochs
+  T_max: null
+  # 仅 cosine：学习率下界
+  eta_min: 0.0
+  # 仅 step：每隔 step_size 个 epoch，lr *= gamma
+  step_size: 15
+  gamma: 0.1
+  # 仅 multistep：在这些 epoch 边界将 lr *= gamma（epoch 从 1 计数时习惯写 20、30 等）
+  milestones: [20, 30]
+
+# -----------------------------------------------------------------------------
+# [8] 训练过程记录的指标
+# -----------------------------------------------------------------------------
+metrics:
+  # 除 Top-1 外，在 train/val/test 中额外统计的 Top-k 准确率（整数列表，如 [3, 5]）
+  topk: [3, 5]
+
+# -----------------------------------------------------------------------------
+# [9] 日志与训练结束行为
+# -----------------------------------------------------------------------------
+logging:
+  # 非 TTY（如 nohup 重定向）时：每隔多少个 train batch 打印一行 loss/acc；1 表示每步都打
+  train_log_every_n_batches: 1
+  # 当未设置 train_log_every_n_batches 时，回退使用该间隔
+  log_interval: 20
+  # 保存 best.pt 的依据：val_acc（越大越好）| val_loss（越小越好）
+  save_best_by: val_acc
+  # 训练全部 epoch 结束后，是否自动在测试集上跑 eval_test（混淆矩阵、test_report 等）
+  eval_on_test_after_train: true
+
+# -----------------------------------------------------------------------------
+# [10] Grad-CAM（独立子命令 gradcam；也可在训练结束后自动运行）
+# -----------------------------------------------------------------------------
+gradcam:
+  # 训练全部结束后是否自动生成 gradcam_samples.png（需已有 best.pt）
+  run_after_train: true
+  # 取哪一层卷积特征做 CAM：layer1 | layer2 | layer3 | layer4（越深越偏语义，通常 layer4）
+  target_layer: layer4
+  num_samples: 8
+  # 热力图与原图叠加权重：越大热力图越显眼，范围约 0.3～0.6
+  alpha: 0.45

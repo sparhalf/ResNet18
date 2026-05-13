@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# PyTorch / 实验输出
+artifacts/
+*.pt
+*.pth
+!**/.gitkeep
+
+# 日志与本地杂项
+*.log
+.nox/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+coverage.xml
+htmlcov/
+
+# 数据集（体积大，请按 README 自行放置；若需纳入版本库可删掉下一行）
+STL10/
+
+# IDE / 系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 环境变量与密钥
+.env
+.env.*
+
+# Cursor（可选；若希望共享规则可删除 .cursor/）
+.cursor/
