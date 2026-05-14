@@ -133,7 +133,3 @@ python main.py train --config configs/default.yaml
 - **Grad-CAM**：对目标 logit 回传梯度，在指定卷积层上生成显著性图（实现见 `src/metrics/gradcam.py`）。
 
 ---
-
-## 过拟合怎么粗看
-
-打开 `curves_loss_acc.png`：若训练损失持续下降、训练准确率明显高于验证，而验证集指标停滞或变差，通常存在过拟合倾向；可配合减小模型容量、增强数据、调高 `weight_decay`、使用 `label_smoothing` 或早停等策略（需在配置或代码中自行启用）。
