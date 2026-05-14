@@ -11,7 +11,7 @@ paths:
   # STL-10 根目录，其下需有 train/、test/ 子目录（每类一个文件夹）
   data_root: STL10
   # 训练日志、权重、划分缓存、测评图等输出目录（可改为 artifacts/exp_xxx 做对比实验）
-  artifacts_dir: artifacts/baseline
+  artifacts_dir: artifacts/default
 
 # -----------------------------------------------------------------------------
 # [2] 可复现与划分

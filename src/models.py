@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+"""手写 ResNet-18 风格网络（BasicBlock + 四阶段堆叠）。
+
+与 torchvision 实现细节不完全一致：stem 为 3×3 conv（适合 STL-10 等小输入），可选 stem 后 MaxPool；
+分类头前为自适应全局池化（avg 或 max）+ 可选 Dropout + Linear。
+"""
+
 from types import SimpleNamespace
 
 import torch.nn as nn
@@ -30,6 +36,8 @@ def _get_adaptive_head_pooling(kind: str) -> nn.Module:
 
 
 class BasicBlock(nn.Module):
+    """标准两卷积残差块；stride 或通道变化时使用 1×1 shortcut 对齐尺寸。"""
+
     expansion = 1
 
     def __init__(
@@ -75,6 +83,8 @@ class BasicBlock(nn.Module):
 
 
 class ResNetManual(nn.Module):
+    """可配置激活、BN、Dropout、池化类型的 ResNet 风格分类网络。"""
+
     def __init__(self, cfg: SimpleNamespace):
         super().__init__()
         self.cfg = cfg
@@ -122,6 +132,7 @@ class ResNetManual(nn.Module):
         self.dropout = nn.Dropout(cfg.dropout) if cfg.dropout > 0 else nn.Identity()
         self.fc = nn.Linear(stage_channels[3] * BasicBlock.expansion, cfg.num_classes)
 
+        # 默认 Kaiming 初始化卷积；全连接用较小方差高斯（与常见 CIFAR 式实现一致）
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
@@ -151,6 +162,7 @@ class ResNetManual(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        """stem → layer1…4 → 全局池化 → flatten → dropout → logits。"""
         x = self.stem(x)
         x = self.layer1(x)
         x = self.layer2(x)
@@ -163,6 +175,7 @@ class ResNetManual(nn.Module):
 
 
 def build_resnet(cfg: SimpleNamespace) -> nn.Module:
+    """根据 cfg.arch 构建模型；当前仅支持 `resnet18_manual`。"""
     if cfg.arch != "resnet18_manual":
         raise ValueError(f"unknown arch {cfg.arch}")
     if len(cfg.layers) != 4:

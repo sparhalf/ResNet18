@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""STL-10 手写 ResNet：命令行入口。
+
+子命令：
+  train      在 train 上训练、在划分的 val 上选优保存 best.pt，并按配置自动测评 / Grad-CAM。
+  eval_test  加载 best.pt，仅在 test 上输出报告与图表。
+  gradcam    在测试集抽样上生成 Grad-CAM 拼图。
+"""
+
 import argparse
 import json
 import random
@@ -35,6 +43,7 @@ from src.models import build_resnet
 
 
 def _project_root() -> Path:
+    """仓库根目录（含 main.py、configs、STL10 的上一级）。"""
     return Path(__file__).resolve().parent
 
 
@@ -45,6 +54,7 @@ def _device(cfg_pin_memory: bool) -> torch.device:
 
 
 def _make_loaders(cfg: Config, train_dir: Path, artifacts: Path):
+    """构造训练集与验证集 DataLoader（同源 train 目录，不同 transform 与索引子集）。"""
     split_dir = artifacts / "splits"
     train_idx, val_idx = load_or_create_split(
         train_root=train_dir,
@@ -91,6 +101,7 @@ def _make_loaders(cfg: Config, train_dir: Path, artifacts: Path):
 
 
 def cmd_train(config_path: Path) -> None:
+    """完整训练流程：写入 artifacts、曲线与 best.pt；可选触发测试评估与 Grad-CAM。"""
     cfg = load_config(config_path)
     root = _project_root()
     set_seed(cfg.repro.seed)
@@ -235,6 +246,7 @@ def cmd_train(config_path: Path) -> None:
 
 
 def cmd_eval_test(config_path: Path) -> None:
+    """在测试集上计算 loss/acc/Top-k，并写出 classification_report 与各类图表。"""
     cfg = load_config(config_path)
     root = _project_root()
     set_seed(cfg.repro.seed)
@@ -307,6 +319,7 @@ def cmd_eval_test(config_path: Path) -> None:
 
 
 def cmd_gradcam(config_path: Path) -> None:
+    """从测试集随机选取若干图像，对当前 best 模型做 Grad-CAM 并保存网格图。"""
     cfg = load_config(config_path)
     root = _project_root()
     set_seed(cfg.repro.seed)
@@ -353,7 +366,9 @@ def cmd_gradcam(config_path: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="STL-10 manual ResNet trainer")
+    parser = argparse.ArgumentParser(
+        description="STL-10 手写 ResNet：train / eval_test / gradcam",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_train = sub.add_parser("train", help="train with train/val split")

@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+"""STL-10 ImageFolder 数据集与训练/验证索引。
+
+FilteredImageFolder：在 torchvision ImageFolder 基础上过滤无效文件。
+划分函数按类别分层抽样，保证各类验证比例大致一致。
+"""
+
 import json
 from pathlib import Path
 
@@ -8,7 +14,7 @@ from torchvision.datasets import ImageFolder
 
 
 class FilteredImageFolder(ImageFolder):
-    """丢弃 0 字节等无效路径，避免读图崩溃；划分与类别名均基于过滤后的列表。"""
+    """丢弃 0 字节等无效样本，避免读图报错；后续划分与 `classes` 均基于过滤后的列表。"""
 
     def __init__(self, root: str, transform=None, target_transform=None):
         super().__init__(root, transform=transform, target_transform=target_transform)
@@ -19,6 +25,7 @@ class FilteredImageFolder(ImageFolder):
 
 
 def class_names(train_root: Path) -> list[str]:
+    """仅扫描 train 根目录下列文件夹名作为类别顺序（与 ImageFolder 一致）。"""
     ds = FilteredImageFolder(str(train_root))
     return ds.classes
 
@@ -28,6 +35,7 @@ def stratified_train_val_indices(
     val_ratio: float,
     seed: int,
 ) -> tuple[list[int], list[int]]:
+    """按类分层：每类随机打乱后前 `val_ratio` 比例进验证集，其余进训练集。"""
     ds = FilteredImageFolder(str(train_root))
     targets = np.array(ds.targets)
     rng = np.random.default_rng(seed)
@@ -49,6 +57,7 @@ def load_or_create_split(
     cache_dir: Path,
     use_cache: bool,
 ) -> tuple[list[int], list[int]]:
+    """读取或生成 train/val 索引；若开启缓存且 meta 一致则直接读 JSON。"""
     cache_dir.mkdir(parents=True, exist_ok=True)
     train_path = cache_dir / "train_indices.json"
     val_path = cache_dir / "val_indices.json"

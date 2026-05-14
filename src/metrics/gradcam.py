@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Grad-CAM：对指定卷积层注册 hook，取目标 logit 对特征图的梯度做加权求和。"""
+
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -19,7 +21,7 @@ def _denormalize(tensor_chw: torch.Tensor) -> np.ndarray:
 
 
 class GradCAM:
-    """Grad-CAM on the final conv feature map (layer4 output before pooling)."""
+    """Grad-CAM：在 `target_layer` 上累积前向激活与反向梯度，生成类显著性图。"""
 
     def __init__(self, model: torch.nn.Module, target_layer: torch.nn.Module):
         self.model = model
@@ -38,11 +40,13 @@ class GradCAM:
         self._handles.append(target_layer.register_full_backward_hook(full_bwd_hook))
 
     def close(self):
+        """移除已注册的 forward/backward hook，避免内存泄漏或重复触发。"""
         for h in self._handles:
             h.remove()
         self._handles.clear()
 
     def __call__(self, input_batch: torch.Tensor, class_idx: int | None = None):
+        """对 `input_batch[0]` 计算 CAM；`class_idx` 默认取当前预测 argmax。"""
         self.model.zero_grad(set_to_none=True)
         logits = self.model(input_batch)
         if class_idx is None:
@@ -61,6 +65,7 @@ class GradCAM:
 def overlay_cam_on_image(
     image_hwc: np.ndarray, cam_11hw: torch.Tensor, alpha: float
 ) -> np.ndarray:
+    """将 CAM 双线性插值到图像尺寸，以 jet 伪彩与 RGB 原图按 alpha 混合。"""
     h, w = image_hwc.shape[:2]
     cam = F.interpolate(cam_11hw, size=(h, w), mode="bilinear", align_corners=False)
     cam = cam[0, 0].detach().cpu().numpy()
@@ -79,6 +84,7 @@ def save_gradcam_grid(
     out_path: Path,
     alpha: float,
 ) -> None:
+    """多行三列拼图：原图、热力图、叠加图；默认解释模型对 argmax 类别的归因。"""
     layer_map = {
         "layer1": model.layer1,
         "layer2": model.layer2,

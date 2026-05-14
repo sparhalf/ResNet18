@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+"""将 YAML 中的增强描述转为 torchvision.transforms.Compose。
+
+增强列表 + ToTensor（+ 可选 ImageNet 归一化）。训练阶段可强制补全最低限度随机增强。
+"""
+
 from typing import Any
 
 from torchvision import transforms
 
 
 def _build_one(item: dict[str, Any]):
+    """将单条 `{"type": ...}` 配置映射为对应 torchvision 变换实例。"""
     t = item["type"]
     if t == "RandomHorizontalFlip":
         return transforms.RandomHorizontalFlip(p=float(item.get("p", 0.5)))
@@ -50,7 +56,7 @@ def _ensure_min_train_augmentation(
     specs: list[dict[str, Any]],
     image_size: int,
 ) -> list[dict[str, Any]]:
-    """训练管线至少包含 RandomHorizontalFlip 与 RandomCrop（与作业要求一致）。"""
+    """至少包含 RandomHorizontalFlip 与 RandomCrop。"""
     out = list(specs)
     present = {s.get("type") for s in out}
     if "RandomHorizontalFlip" not in present:
@@ -71,6 +77,7 @@ def build_transforms(
     image_size: int = 96,
     ensure_min_train_aug: bool = False,
 ):
+    """由 YAML 列表构建 Compose；末尾固定为 ToTensor +（可选）Normalize。"""
     s = _ensure_min_train_augmentation(specs, image_size) if ensure_min_train_aug else list(specs)
     ops = [_build_one(x) for x in s]
     base = [transforms.ToTensor()]

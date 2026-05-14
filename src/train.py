@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+"""训练与评估核心逻辑。
+
+负责：YAML 与默认配置合并、工程路径解析、随机种子、优化器/调度器/损失函数、
+单 epoch 训练循环及验证/测试用的 evaluate。日志在 TTY 上用 tqdm，否则按间隔打印行日志。
+"""
+
 import os
 import random
 import sys
@@ -20,6 +26,7 @@ from src.metrics.classification import accuracy_topk
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """递归合并两个字典；override 中的叶子覆盖 base。"""
     out = dict(base)
     for k, v in override.items():
         if k in out and isinstance(out[k], dict) and isinstance(v, dict):
@@ -68,7 +75,7 @@ def yaml_load(path: Path) -> Any:
 
 
 def load_config(path: str | Path) -> SimpleNamespace:
-    """先读 `configs/default.yaml`，再与用户 YAML 深度合并。"""
+    """读取用户 YAML，并与项目内 `configs/default.yaml` 深度合并后转为可点号访问的对象。"""
     path = Path(path)
     root = _find_project_root(path)
     base_raw = yaml_load(root / "configs" / "default.yaml")
@@ -80,6 +87,7 @@ def load_config(path: str | Path) -> SimpleNamespace:
 
 
 def resolve_paths(cfg: SimpleNamespace, project_root: Path) -> tuple[Path, Path, Path]:
+    """由配置解析 train 目录、test 目录与 artifacts 根目录（均为绝对路径）。"""
     data_root = (project_root / cfg.paths.data_root).resolve()
     artifacts = (project_root / cfg.paths.artifacts_dir).resolve()
     train_dir = data_root / "train"
@@ -91,6 +99,7 @@ Config = SimpleNamespace
 
 
 def set_seed(seed: int) -> None:
+    """固定 Python/NumPy/PyTorch 种子，并打开 cudnn 确定性（略损速度换可复现）。"""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -101,6 +110,7 @@ def set_seed(seed: int) -> None:
 
 
 def build_optimizer(model: nn.Module, cfg: Config):
+    """按 cfg.optimizer.name 构建 SGD / Adam / AdamW（仅 SGD 使用 momentum、nesterov）。"""
     o = cfg.optimizer
     params = model.parameters()
     name = o.name.lower()
@@ -120,6 +130,7 @@ def build_optimizer(model: nn.Module, cfg: Config):
 
 
 def build_scheduler(optimizer, cfg: Config):
+    """学习率调度器工厂：cosine / step / multistep / none。"""
     s = cfg.scheduler
     name = s.name.lower()
     if name == "none" or name == "null":
@@ -135,6 +146,7 @@ def build_scheduler(optimizer, cfg: Config):
 
 
 def build_criterion(cfg: Config) -> nn.Module:
+    """多分类交叉熵，支持标签平滑（见 cfg.train.label_smoothing）。"""
     return nn.CrossEntropyLoss(label_smoothing=cfg.train.label_smoothing)
 
 
@@ -161,6 +173,7 @@ def train_epoch(
     cfg_logging,
     grad_clip_norm: float,
 ) -> tuple[float, float, dict[int, float]]:
+    """单轮训练：前向、反向、可选梯度裁剪；返回本 epoch 平均 loss、Top-1 acc、各 Top-k acc。"""
     model.train()
     total_loss = 0.0
     total_correct = 0
@@ -252,6 +265,7 @@ def evaluate(
     topk: tuple[int, ...],
     desc: str = "eval",
 ) -> tuple[float, float, dict[int, float]]:
+    """在 loader 上评估（无梯度）：平均 loss、Top-1、各 Top-k。"""
     model.eval()
     total_loss = 0.0
     total_correct = 0

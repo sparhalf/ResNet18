@@ -1,90 +1,139 @@
-# STL-10 手写 ResNet 可配置训练框架
+# STL-10 手写 ResNet 可配置训练
 
-本项目在 PyTorch 中从头实现 ResNet-18 风格的残差网络（不使用 `torchvision.models.resnet`），配合 YAML 配置完成数据增强、结构选项与优化器的快速对比实验。
+在 **PyTorch** 中从零实现 **ResNet-18 风格**残差网络（不调用 `torchvision.models.resnet`），用 **YAML** 统一配置数据增强、网络选项与优化器，便于做对照实验。
 
-## 数据布局
+---
 
-将 STL-10 按类别文件夹放在仓库根目录下的 `STL10/`：
+## 目录
 
-- `STL10/train/`：7000 张（训练 + 从中划分验证）
-- `STL10/test/`：1000 张（仅训练结束后评估一次）
+1. [功能概览](#功能概览)  
+2. [数据准备](#数据准备)  
+3. [环境与运行](#环境与运行)  
+4. [命令说明](#命令说明)  
+5. [配置怎么生效](#配置怎么生效)  
+6. [输出文件](#输出文件)  
+7. [代码结构](#代码结构)  
+8. [指标与可视化](#指标与可视化)  
+9. [过拟合怎么粗看](#过拟合怎么粗看)
 
-训练与验证阶段**不得**读取 `test`。
+---
 
-若数据中存在 **0 字节或损坏图片**，`src/data/dataset.py` 中的 `FilteredImageFolder` 会跳过这些路径，分层划分与训练索引均基于过滤后的样本列表。
+## 功能概览
 
-验证集默认从训练集中按类别 **分层随机划分 15%**（约每类 120 张验证、680 张训练），划分索引缓存在对应实验的 `artifacts/.../splits/` 下，便于复现。
-
-## 环境
-
-```bash
-cd /data/home/dyq/programme_2
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-## 常用命令
-
-在项目根目录执行（确保当前目录为 `programme_2`，以便相对路径 `STL10` 与 `configs` 生效）：
-
-```bash
-python main.py train --config configs/default.yaml
-python main.py eval_test --config configs/default.yaml
-python main.py gradcam --config configs/default.yaml
-```
-
-使用 `nohup ... > train.log 2>&1 &` 时，标准输出被判定为非交互终端：会按 `logging.train_log_every_n_batches`（默认每个 batch 一行）写入带时间戳的 `loss` / `avg_loss` / `batch_acc` / `run_acc` / `lr` / `top-k`；本机交互终端仍使用 `tqdm` 动态刷新。
-
-- `train`：训练并在 `artifacts/<run>/` 写入 `best.pt`、`metrics_history.json`、`curves_loss_acc.png`、`config_used.yaml`。默认 `logging.eval_on_test_after_train: true`，训练结束后会**自动**在测试集上跑一次测评（与单独执行 `eval_test` 相同产物）。默认 `gradcam.run_after_train: true`，会在其后自动生成 `gradcam_samples.png`。
-- `eval_test`：加载 `best.pt`，在 **测试集** 上输出 `test_report.txt`、`test_confusion_matrix.png`、`test_topk_bar.png`、`test_per_class_recall_f1.png`。若已将 `eval_on_test_after_train` 设为 `false`，需在本训练结束后再手动运行此命令。
-- `gradcam`：在测试集随机抽样图像上生成 `gradcam_samples.png`。若训练时已自动跑过，可省略；也可单独改参数后再执行以重新出图。
-
-## 对比实验预设
-
-`configs/experiments/` 下提供三组仅改关键项的完整配置（各自输出到不同 `artifacts_dir`）：
-
-| 文件 | 侧重 |
+| 能力 | 说明 |
 |------|------|
-| `exp_heavy_augmentation.yaml` | 更强增强 + Dropout |
-| `exp_adam_cosine.yaml` | AdamW + 较小 eta_min 的余弦退火 |
-| `exp_max_pool_head.yaml` | GELU + 全局最大池化分类头 |
+| 训练 / 验证 | 从 `train/` 分层划分验证集，**训练阶段不读 `test/`** |
+| 测试集评估 | `eval_test`：分类报告、混淆矩阵、Top-k、每类 recall/F1 |
+| 可解释性 | **Grad-CAM**（非经典 CAM），默认训练结束后可自动生成热力图 |
 
-示例：
+---
 
-```bash
-python main.py train --config configs/experiments/exp_adam_cosine.yaml
+## 数据准备
+
+在**项目根目录**（与 `main.py` 同级）放置 **STL-10**，按 **ImageFolder** 布局：
+
+```text
+STL10/
+  train/          # 约 7000 张，每类一个子文件夹
+    airplane/
+    bird/
+    ...
+  test/           # 约 1000 张，结构同 train
+    ...
 ```
 
-## 源码结构（节选）
+- **训练与验证**只使用 `STL10/train/`；**测试**仅在 `eval_test` 或训练结束自动测评时使用 `STL10/test/`。  
+- 若存在 **0 字节或损坏图片**，`FilteredImageFolder` 会过滤掉，划分与类别名都基于过滤后的样本。  
+- 验证集默认从训练集 **按类分层随机划分** 一部分比例，具体数值见 `configs/default.yaml` 中的 `repro.val_ratio`。划分索引可缓存在本次运行的 `artifacts/.../splits/`，便于复现。
 
-- `main.py`（项目根目录）：CLI（`train` / `eval_test` / `gradcam`）。
-- `src/models.py`：手写 ResNet（`build_resnet`）。
-- `src/train.py`：YAML 配置加载与路径解析（`load_config`、`resolve_paths`）、`Config` 类型别名、随机种子、优化器/调度器/损失、`train_epoch` / `evaluate`。
-- `src/data/dataset.py`：`FilteredImageFolder`、类别名、训练/验证分层划分与划分缓存。
-- `src/data/transforms.py`：YAML 列表 → `torchvision` 变换；`augmentation_enabled` 为 true 时训练默认保证至少含 **RandomHorizontalFlip** 与 **RandomCrop**（可在 YAML 中显式写，缺失时自动补全）。
-- `src/metrics/`：指标与绘图。
+---
 
-## 可插拔配置说明（摘要）
+## 环境与运行
 
-运行时优先读取 [`configs/default.yaml`](configs/default.yaml) 作为默认值，再与命令行传入的 YAML **深度合并**（后者覆盖同名键）。合并结果在内存中为可点号访问的结构（见 `src/train.py` 中的 `load_config`）。
+在仓库根目录执行（保证相对路径 `STL10/`、`configs/` 正确）：
 
-- **数据**：`data.augmentation_enabled` 为总开关（关则训练不做随机增强）；`data.augmentation_train` 由 `src/data/transforms.py` 映射；开启时若未写水平翻转或随机裁剪会自动补上（`ensure_min_train_aug=True`）。
-- **模型**：`activation`、`use_bn`、`dropout`、`head_pooling` 等见 `configs/default.yaml`。
-- **优化 / 调度**：`optimizer.name` 支持 `sgd` / `adam` / `adamw`；`scheduler.name` 支持 `cosine` / `step` / `multistep` / `none`（余弦退火默认 `T_max` 等于训练 epoch 数）。
-- **Grad-CAM**：`gradcam.run_after_train` 控制训练结束后是否自动生成热力图（默认 true）。
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 
-## 额外指标与可视化
+python main.py train --config configs/default.yaml
+```
 
-除 Precision / Recall / F1 与混淆矩阵外，实现：
+---
 
-1. **Top-k 准确率**（默认 k=3、5）：测试汇总写入报告并生成 `test_topk_bar.png`。
-2. **各类 recall 与 F1 条形图**：`test_per_class_recall_f1.png`。
+## 命令说明
 
-## 过拟合判断提示
+| 子命令 | 作用 |
+|--------|------|
+| `train` | 训练；写入 `artifacts/<本次配置里的 artifacts_dir>/` 下的权重、曲线、历史 JSON，并复制 `config_used.yaml`。若配置中开启，会在结束后自动跑测试评估与 Grad-CAM。 |
+| `eval_test` | 加载同目录下的 `best.pt`，在 **测试集** 上生成报告与图表（训练未完成或关闭自动测评时可单独执行）。 |
+| `gradcam` | 在测试集上随机抽样，生成 `gradcam_samples.png`（三列：原图预览、热力图、叠加图 + 预测类名）。 |
 
-对比 `curves_loss_acc.png` 中训练与验证曲线：若训练损失持续下降且训练准确率显著高于验证，而验证指标停滞或变差，则呈现典型过拟合迹象。
+**日志行为**：交互终端下训练循环使用 `tqdm`；若标准错误**不是** TTY（例如 `nohup ... > train.log 2>&1 &`），则按 `logging.train_log_every_n_batches` 定期打印带时间戳的 loss / acc / lr / top-k 等行，便于落盘排查。
 
-## AI 工具声明（作业用）
+**对比多组实验**：复制 `configs/default.yaml`（或另存为 `configs/my_exp.yaml`），只改 `paths.artifacts_dir` 等关键字段，再 `train --config configs/my_exp.yaml`，各次输出互不覆盖。
 
-若在报告中需声明 AI 辅助，请根据自身使用情况填写工具名称与用途（例如：架构草稿、代码骨架、文档 wording 等）。
+---
+
+## 配置怎么生效
+
+1. **加载顺序**：先读 `configs/default.yaml`，再与命令行 `--config` 指定的 YAML **深度合并**（后者覆盖同名键）。  
+2. **项目根**：配置解析会从你传入的 YAML 路径向上查找含 `configs/default.yaml` 的目录作为根路径（一般即克隆下来的仓库根）。  
+3. **常用键**（完整说明与默认值以 `configs/default.yaml` 内注释为准）：
+
+| 区域 | 含义摘要 |
+|------|----------|
+| `paths` | `data_root`（如 `STL10`）、`artifacts_dir`（输出子目录） |
+| `repro` | 随机种子、验证比例、是否缓存划分 |
+| `data` | batch、增强列表、`augmentation_enabled` 总开关 |
+| `model` | `activation`、`use_bn`、`dropout`、`head_pooling`、`stem_maxpool` 等 |
+| `optimizer` / `scheduler` | 名称与小写枚举见 YAML 注释 |
+| `logging` | 最佳权重依据、`eval_on_test_after_train`、batch 日志间隔 |
+| `gradcam` | 目标层名、样本数、叠加透明度 `alpha` |
+
+训练阶段若开启增强且未显式写出水平翻转或随机裁剪，会在代码侧 **自动补** 最低限度增强（见 `src/data/transforms.py`）。
+
+---
+
+## 输出文件
+
+在 `paths.artifacts_dir` 所指目录下，常见文件包括：
+
+| 文件 | 说明 |
+|------|------|
+| `best.pt` | 验证集上最优 checkpoint（含 `model_state`、`classes` 等） |
+| `config_used.yaml` | 本次训练使用的配置副本 |
+| `metrics_history.json` | 每 epoch 的 train/val 指标 |
+| `curves_loss_acc.png` | 损失与 Top-1 准确率曲线 |
+| `test_report.txt` | 测试 loss、Top-k 与 `classification_report` 文本 |
+| `test_confusion_matrix.png` 等 | 混淆矩阵、Top-k 柱状图、每类 recall/F1 |
+| `gradcam_samples.png` | Grad-CAM 网格图 |
+| `splits/*.json` | 训练/验证索引与划分元数据（若开启缓存） |
+
+---
+
+## 代码结构
+
+| 路径 | 职责 |
+|------|------|
+| `main.py` | CLI：`train` / `eval_test` / `gradcam`；组 DataLoader、调训练与测评流程 |
+| `src/train.py` | 配置合并与路径解析、随机种子、优化器/调度器/损失、单轮训练与 `evaluate` |
+| `src/models.py` | `BasicBlock`、`ResNetManual`、`build_resnet` |
+| `src/data/dataset.py` | `FilteredImageFolder`、分层划分与划分缓存 |
+| `src/data/transforms.py` | YAML 增强列表 → `torchvision` 的 `Compose` |
+| `src/metrics/` | Top-k、预测收集、绘图与 Grad-CAM |
+
+---
+
+## 指标与可视化
+
+- **Precision / Recall / F1**：由 `sklearn.metrics.classification_report` 生成；在各类样本数相同时，**macro avg** 的 recall 与 **Top-1 accuracy** 数值一致，可对照 `test_report.txt` 理解。  
+- **Top-k 准确率**（默认 k=3、5）：真实类出现在 logits Top-k 中的比例。  
+- **Grad-CAM**：对目标 logit 回传梯度，在指定卷积层上生成显著性图（实现见 `src/metrics/gradcam.py`）。
+
+---
+
+## 过拟合怎么粗看
+
+打开 `curves_loss_acc.png`：若训练损失持续下降、训练准确率明显高于验证，而验证集指标停滞或变差，通常存在过拟合倾向；可配合减小模型容量、增强数据、调高 `weight_decay`、使用 `label_smoothing` 或早停等策略（需在配置或代码中自行启用）。

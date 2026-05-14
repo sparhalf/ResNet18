@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""训练曲线、混淆矩阵、条形图等 matplotlib 导出（dpi 固定约 160 便于报告插入）。"""
+
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +11,7 @@ from sklearn.metrics import confusion_matrix
 
 
 def plot_curves(history: list[dict[str, Any]], out_path: Path) -> None:
+    """双 subplot：train/val 的 loss 与 Top-1 accuracy 随 epoch 变化。"""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     epochs = np.arange(1, len(history) + 1)
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
@@ -38,6 +41,7 @@ def plot_confusion(
     labels: list[str],
     out_path: Path,
 ) -> None:
+    """绘制混淆矩阵热力图并在格内标注样本计数。"""
     cm = confusion_matrix(y_true, y_pred, labels=list(range(len(labels))))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -78,6 +82,7 @@ def plot_per_class_bars(
     f1s: list[float],
     out_path: Path,
 ) -> None:
+    """各类 recall 与 F1 的分组柱状图。"""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     x = np.arange(len(class_names))
     w = 0.35
@@ -96,6 +101,7 @@ def plot_per_class_bars(
 
 
 def plot_topk_bar(topk_acc: dict[int, float], out_path: Path) -> None:
+    """测试集上各 Top-k 准确率柱状图（k 为字典键）。"""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ks = sorted(topk_acc.keys())
     vals = [topk_acc[k] for k in ks]
